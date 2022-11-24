@@ -1,0 +1,210 @@
+const Binance = require("node-binance-api");
+const criptoOrder = require('./../utils/criptobot-binance-order')
+const cbk = {
+    min: 0,
+    max: 0
+}
+let blocked = false
+let automations = []
+let app = false
+let time = 500
+async function chennelBreak(application, automation) {
+    try {
+        const mm = await automation.conditions.indexOf("min") !== -1 ? 'min' : 'max'
+        const k = await application.redis.getAll()
+        const kc = k.filter(e => e.indexOf("CHANNEL-BREAK") !== -1)
+        const cb = JSON.parse(await application.redis.get(kc[0]))
+        // if (cbk[mm] !== dispPrice) {
+            cbk[mm] = cb['current'][mm]
+            app = application
+            automations.push(automation)
+        // }
+    } catch (error) {
+        // console.log(error);
+    }
+    setTimeout(async () => {
+        time = time + 500
+        await process()
+        time = time - 500
+
+    }, time);
+}
+
+async function process() {
+    if (!blocked && automations.length > 0) {
+        blocked = true
+        for (const automation of automations) {
+            switch (automation.strategyType) {
+                case 'DEV':
+                    await orderDev(automation)
+                    break;
+                case 'DEMO':
+                    await orderDemo(automation)
+                    break;
+                default:
+                    break;
+            }
+        }
+        blocked = false
+    }
+}
+
+async function orderDev(automation) {
+
+
+    const data = automation
+    automations.splice(automations.indexOf(automation), 1)
+    const cred = await app.DB.models.ExCredentials.findOne({ raw: true, where: { id: data.exCredentialId, statusBotFutures: true } })
+    if (!cred) return false
+    const binance = await new Binance({
+        APIKEY: cred.accessKey,
+        APISECRET: cred.secretKey,
+        recvWindow: 30000
+    })
+
+    const positionRisk = (await binance.futuresPositionRisk({ symbol: data.symbol }))[0]
+    const markPrice = parseFloat(positionRisk.markPrice)
+    // console.log('positionRisk', positionRisk);
+
+    const mm = await data.conditions.indexOf("min") !== -1 ? 'min' : 'max'
+    const k = await app.redis.getAll()
+    const kc = k.filter(e => e.indexOf("CHANNEL-BREAK") !== -1)
+    const cb = JSON.parse(await app.redis.get(kc[0]))
+    const dispPrice = cb['current'][mm]
+
+    const client = await new criptoOrder({
+        APIKEY: cred.accessKey,
+        APISECRET: cred.secretKey,
+    })
+
+    const symbolFilter = await app.symbolFilters.getSymbolFilter(data.symbol, automation)
+    const size = 1
+    const symbol = data.symbol
+    const price = dispPrice
+    const leverage = automation.leverage
+    const amount = parseFloat((size * leverage) / price).toFixed(symbolFilter.LOT_SIZE)
+    const side = data.side
+    if (parseFloat(positionRisk.entryPrice) === 0) {
+
+        // buscar e excluir ordens new
+        const orders = await app.DB.models.BotOrderTraders.findAll({
+            raw: true,
+            where: {
+                traderId: cred.traderId,
+                symbol: data.symbol,
+                status: 'NEW',
+                automationId: automation.id
+            }
+        })
+        for (const order of orders) {
+            if (order.id){
+                if (order.price !== dispPrice){
+                    await cancellOrder(order)
+                }else{
+                    return false
+                }
+            }
+
+        }
+    async function cancellOrder(order){
+        await app.DB.models.BotOrderTraders.update({ status: 'CANCELED' }, { where: { orderId: order.orderId } })
+        await binance.futuresCancel(order.symbol, { orderId: order.orderId })
+        return true
+    }
+
+        await app.DB.models.BotOrderTraders.create({
+            automationId: automation.id,
+            traderId: cred.traderId,
+            orderId: Math.floor(Date.now() * Math.random()),
+            clientOrderId: Math.floor(Date.now() * Math.random()).toString(35),
+            symbol: data.symbol,
+            status: 'NEW',
+            origQty: amount,
+            type: 'FUTURES',
+            side,
+            updateTime: Date.now(),
+            isWorking: true
+        })
+            .then(async resultCreate => {
+                // console.log('resultCreate', resultCreate);
+                await client.futuresNewOrderLimit(symbol, amount, price, side, leverage, resultCreate.clientOrderId)
+                    .then(async ressultNewOrder => {
+                        // console.log('ressultNewOrder', ressultNewOrder);
+                        return await app.DB.models.BotOrderTraders.update(ressultNewOrder, { where: { id: resultCreate.id } })
+
+                    })
+                    .catch(async err => {
+                        console.log("erro ao lançar ordem na binance em channel_break");
+                        console.log(err);
+                        await app.DB.models.BotOrderTraders.destroy({ where: { id: resultCreate.id } })
+                        await binance.futuresCancel(resultCreate.symbol, { clientOrderId: resultCreate.clientOrderId })
+                    })
+
+            })
+    }
+
+    app.telegram.sendMessage(`
+    ${data.name}
+    Symbol: ${data.symbol}
+    Preço da ordem: ${dispPrice},
+    Side: ${data.side}
+    `)
+    if (app.CHANNEL_BREAK) app.logger(`CB: ${data.name}`, `${data.symbol}: ${dispPrice}`);
+
+}
+
+async function orderDemo(automation) {
+    const data = automation
+    automations.splice(automations.indexOf(automation), 1)
+    const cred = await app.DB.models.ExCredentials.findOne({ raw: true, where: { id: data.exCredentialId } })
+    // buscar e excluir ordens new
+    await app.DB.models.BotOrderDemos.findAll({ raw: true, where: { traderId: cred.traderId, isWorking: true, symbol: data.symbol, side: data.side, status: 'NEW', orderDemoId: null } })
+        .then(async res => {
+            for (const order of res) {
+                await app.DB.models.BotOrderDemos.destroy({ where: { id: order.id } })
+            }
+            return true
+        })
+    // fim buscar e excluir ordens new
+
+    const mm = await data.conditions.indexOf("min") !== -1 ? 'min' : 'max'
+    const k = await app.redis.getAll()
+    const kc = k.filter(e => e.indexOf("CHANNEL-BREAK") !== -1)
+    const cb = JSON.parse(await app.redis.get(kc[0]))
+    const dispPrice = cb['current'][mm]
+    const orderDemoData = {
+        traderId: cred.traderId,
+        automationId: data.id,
+        entryType: 'SIGNAL',
+        symbol: data.symbol,
+        orderId: Math.floor(Date.now() * Math.random()),
+        clientOrderId: Math.floor(Date.now() * Math.random()).toString(35),
+        transactTime: Date.now(),
+        type: 'LIMIT',
+        side: data.side,
+        status: 'NEW',
+        price: dispPrice,
+        origQty: 0.001,
+        quantity: 0.001,
+        comment: 'Bot Working',
+        isWorking: true,
+    }
+    const orderDemos = await app.DB.models.BotOrderDemos.findAll({ raw: true, where: { traderId: cred.traderId, isWorking: true, symbol: data.symbol, side: data.side } })
+    // console.log(orderDemos.length);
+    if (orderDemos.length === 0) {
+        await app.DB.models.BotOrderDemos.create(orderDemoData)
+            .catch(err => {
+                console.log(err);
+            })
+    }
+
+    app.telegram.sendMessage(`
+    ${data.name}
+    Symbol: ${data.symbol}
+    Preço da ordem: ${dispPrice},
+    Side: ${data.side}
+    `)
+    if (app.CHANNEL_BREAK) app.logger(`CB: ${data.name}`, `${data.symbol}: ${dispPrice}`);
+    return true
+}
+module.exports = chennelBreak
