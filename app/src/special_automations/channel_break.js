@@ -44,18 +44,7 @@ async function orderDev( automation, currentPrice ) {
 
     const positionRisk = (await binance.futuresPositionRisk({ symbol: data.symbol }))[0]
 
-    // const tpConditions = await data.tpConditions.split('.')
-    // const tpIndicator = tpConditions[0]
-    // const tpMultiplicador = tpConditions[1].split('*')
-    // const monitorData = JSON.parse(await app.redis.get(tpIndicator))
-    // if (!monitorData)return  false
-    // const valueIndicator = monitorData['current']
-    //
-    // console.log('tpConditions: ',tpConditions);
-    // console.log('tpIndicator: ',tpIndicator);
-    // console.log('tpMultiplicador: ',tpMultiplicador);
-    // console.log('valueIndicator: ',valueIndicator*tpMultiplicador[1]);
-
+    // console.log('Position==============: ',positionRisk);
     // return false
 
     const client = await new criptoOrder({
@@ -131,8 +120,15 @@ async function orderDev( automation, currentPrice ) {
                 isWorking: true
             })
             const ressultNewOrder = await client.futuresNewOrderLimit(symbol, lote, price, side, leverage, resultCreate.clientOrderId)
+            // console.log('channel==============: ',ressultNewOrder);
+
             const result_update = await app.DB.models.BotOrderTraders.update(ressultNewOrder, { where: { id: resultCreate.id } })
 
+            app.telegram.sendMessage(`
+                ${data.name} - Symbol: ${data.symbol},
+                Preço da ordem: ${currentPrice},
+                Side: ${data.side}
+            `)
         } catch ( error ) {
             if( resultCreate ) await app.DB.models.BotOrderTraders.destroy({ where: { id: resultCreate.id } })
             if( resultCreate && ressultNewOrder ) await binance.futuresCancel(resultCreate.symbol, { clientOrderId: resultCreate.clientOrderId })
@@ -140,12 +136,12 @@ async function orderDev( automation, currentPrice ) {
         }
     }
 
-    app.telegram.sendMessage(`
-        ${data.name}
-        Symbol: ${data.symbol}
-        Preço da ordem: ${currentPrice},
-        Side: ${data.side}
-    `)
+    // app.telegram.sendMessage(`
+    //     ${data.name}
+    //     Symbol: ${data.symbol}
+    //     Preço da ordem: ${currentPrice},
+    //     Side: ${data.side}
+    // `)
 
     if( app.CHANNEL_BREAK ) app.logger(`CB: ${data.name}`, `${data.symbol}: ${currentPrice}`);
 }

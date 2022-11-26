@@ -36,28 +36,52 @@ async function startFuturesMonitor(app) {
     async function account_update_callback(data) {
         // console.log('account_update_callback', data);
     }
-    let time = 1000
+    // let time = 1000
+    let time = 500
     async function order_update_callback(data, client, binance) {
-        time = time + 1000
+        // time = time + 1000
+        time = time + 500
         setTimeout(async () => {
             await registerOrder(data, client, binance)
-            time = time - 1000
+            // time = time - 1000
+            time = time - 500
         }, time);
     }
 
     async function registerOrder(data, client, binance) {
+
+        // console.log('status da ordem: ',`${data.clientOrderId} = ${data.orderStatus}`)
         data = data.order
         data.traderId = client.traderId
         data.status = data.orderStatus
         data.origQty = data.originalQuantity
         data.type = data.originalOrderType
+        data.isMaker = data.isMakerSide
+        data.reduceOnly = data.isReduceOnly
         data.updateTime = data.orderTradeTime
+        data.activatePrice = data.activationPrice
+        data.priceRate = data.callbackRate
+
         delete data.orderType
         if (data.status === 'CANCELED') data.isWorking = 0
 
         const orderDB = await app.DB.models.BotOrderTraders.findOne({ raw: true, where: { clientOrderId: data.clientOrderId } })
         let orderDBF
         if (orderDB) {
+
+            if (data.status === 'FILLED') {
+                data.avgPrice = parseFloat(data.averagePrice);
+                data.commissionAsset = data.commissionAsset
+                data.commission = data.commission;
+                data.executedQty = data.orderFilledAccumulatedQuantity;
+
+                const isQuoteCommission = data.commissionAsset && orderDB.symbol.endsWith(data.commissionAsset);
+                const notional = parseFloat(orderDB.origQty) * data.avgPrice;//volume operado
+                data.cummulativeQuoteQty = notional - (isQuoteCommission ? parseFloat(data.commission) : 0);//volume operado - comissao
+                data.realizedProfit = data.realizedProfit;//gain ou loss
+                // data.obs = `Profit=${data.realizedProfit}. Commission=${data.commissionAsset}`;
+            }
+
             await app.DB.models.BotOrderTraders.update(data, { where: { clientOrderId: orderDB.clientOrderId } })
             orderDBF = await app.DB.models.BotOrderTraders.findOne({ raw: true, where: { clientOrderId: orderDB.clientOrderId } })
         } else {
@@ -276,9 +300,11 @@ async function startFuturesMonitor(app) {
                             valorBreak = (parseFloat(bk.order.price) + ((diferenca * bk.automation.beConditions) - diferenca));
                         }
                     }
-                    if (bk.order.side == 'SELL' && data.c <= valorBreak) {
+                    // if (bk.order.side == 'SELL' && data.c <= valorBreak) {
+                    if (bk.order.side == 'SELL' && data.c < valorBreak) {
                         await bkOrder(bk)
-                    } else if (bk.order.side == 'BUY' && data.c >= valorBreak) {
+                    // } else if (bk.order.side == 'BUY' && data.c >= valorBreak) {
+                    } else if (bk.order.side == 'BUY' && data.c > valorBreak) {
                         await bkOrder(bk)
                     }
                 }
@@ -288,8 +314,8 @@ async function startFuturesMonitor(app) {
         async function bkOrder(bk) {
             try {
                 app.telegram.sendMessage(`
-                        BreakEven da automação: ${data.automation.name}
-                        Symbol: ${data.automation.symbol}
+                        BreakEven da automação: ${bk.automation.name}
+                        Symbol: ${bk.automation.symbol}
                         Preço da ordem: ${bk.order.price},
                         `)
 
