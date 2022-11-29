@@ -55,7 +55,7 @@ async function orderDev( automation, currentPrice ) {
     const symbolFilter = await app.symbolFilters.getSymbolFilter(data.symbol, automation)
 
     //o valor de amount tera que vir do gerenciamento do capital(ainda não foi finalizado)
-    const amount = 5
+    const amount = 1
     const symbol = data.symbol
     const price = currentPrice
     const leverage = automation.leverage
@@ -105,8 +105,9 @@ async function orderDev( automation, currentPrice ) {
             return true
         }
 
+        let resultCreate, ressultNewOrder, result_update
         try {
-            const resultCreate = await app.DB.models.BotOrderTraders.create({
+            resultCreate = await app.DB.models.BotOrderTraders.create({
                 automationId: automation.id,
                 traderId: cred.traderId,
                 orderId: Math.floor(Date.now() * Math.random()),
@@ -119,11 +120,8 @@ async function orderDev( automation, currentPrice ) {
                 updateTime: Date.now(),
                 isWorking: true
             })
-            const ressultNewOrder = await client.futuresNewOrderLimit(symbol, lote, price, side, leverage, resultCreate.clientOrderId)
-            // console.log('channel==============: ',ressultNewOrder);
-
-            const result_update = await app.DB.models.BotOrderTraders.update(ressultNewOrder, { where: { id: resultCreate.id } })
-
+            ressultNewOrder = await client.futuresNewOrderLimit(symbol, lote, price, side, leverage, resultCreate.clientOrderId)
+            result_update = await app.DB.models.BotOrderTraders.update(ressultNewOrder, { where: { id: resultCreate.id } })
             app.telegram.sendMessage(`
                 ${data.name} - Symbol: ${data.symbol},
                 Preço da ordem: ${currentPrice},
