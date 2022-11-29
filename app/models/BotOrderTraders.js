@@ -42,7 +42,7 @@ BotOrderTraders.init(
         realizedProfit: { type: DataTypes.DECIMAL(18, 8), allowNull: true },
         cummulativeQuoteQty: { type: DataTypes.DECIMAL(18, 8), allowNull: true },
 
-        net: { type: DataTypes.DECIMAL(18, 8), allowNull: true },
+        commissionAssetPrice: { type: DataTypes.DECIMAL(18, 8), allowNull: true },
         obs: {type: DataTypes.TEXT, allowNull: true},
         orderType: { type: DataTypes.ENUM(['TP', 'SL']) },
         isWorking: { type: DataTypes.TEXT, allowNull: true },

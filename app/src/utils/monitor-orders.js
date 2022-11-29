@@ -1,5 +1,5 @@
 const Binance = require("node-binance-api");
-
+const binance = new Binance()
 const BINANCE_LOGS = process.env.BINANCE_LOGS
 const BINANCE_RECV_WINDOW = process.env.BINANCE_RECV_WINDOW
 
@@ -15,21 +15,29 @@ async function startFuturesMonitor(app) {
     })
 
     for (const client of clients) {
-        const binance = await new Binance({
+        // const binance = await new Binance({
+        //
+        // })
+        await binance.options({
             APIKEY: client.accessKey,
             APISECRET: client.secretKey,
             recvWindow: BINANCE_RECV_WINDOW,
             verbose: BINANCE_LOGS
         })
+       binance.APIKEY = client.accessKey;
+        binance.APISECRET = client.secretKey;
         await binance.websockets.userFutureData(
             margin_call_callbakc,
             account_update_callback,
-            data =>
-                order_update_callback(data, client, binance),
-            data => binance.options.futuresListenKey = data
+            data =>order_update_callback(data, client, binance),
+            data => binance.options.futuresListenKey = data,
+            data => accountCallback(data)
         )
     }
 
+    async function accountCallback(data) {
+        // console.log('margin_call_callbakc', data);
+    }
     async function margin_call_callbakc(data) {
         // console.log('margin_call_callbakc', data);
     }
@@ -79,6 +87,14 @@ async function startFuturesMonitor(app) {
                 const notional = parseFloat(orderDB.origQty) * data.avgPrice;//volume operado
                 data.cummulativeQuoteQty = notional - (isQuoteCommission ? parseFloat(data.commission) : 0);//volume operado - comissao
                 data.realizedProfit = data.realizedProfit;//gain ou loss
+
+                const bnbPrice = JSON.parse(await app.redis.get('BNBBUSD:1m'))
+                if (bnbPrice) {
+                    data.commissionAssetPrice = bnbPrice.current
+                    // data.obs = `BNB: ${bnbPrice.current}`
+                    // console.log('BNB===========monitor order: ', bnbPrice.current)
+                }
+
                 // data.obs = `Profit=${data.realizedProfit}. Commission=${data.commissionAsset}`;
             }
 

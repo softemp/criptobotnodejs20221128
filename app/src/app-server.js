@@ -56,18 +56,26 @@ module.exports = async ( app ) => {
         },
     });
 
-    userMonitors.map(async ( m ) => {
-        const data = m.dataValues;
-        app.redis.set(
-            `MONITORS:${data.id}:${data.symbol}:${data.interval}`,
-            `${data.indexes}`
-        );
-        app.logger(
-            "M",
-            `MONITORS:${data.id}:${data.symbol}:${data.interval} ${data.indexes}`
-        );
-        app.exchange.fsubscribe(data.symbol, data.interval);
-    });
+    if (userMonitors.length > 0){
+        // console.log('***********************: ',userMonitors);
+        // return false
+
+        userMonitors.map(async ( m ) => {
+            const data = m.dataValues;
+            app.redis.set(
+                `MONITORS:${data.id}:${data.symbol}:${data.interval}`,
+                `${data.indexes}`
+            );
+            app.logger(
+                "M",
+                `MONITORS:${data.id}:${data.symbol}:${data.interval} ${data.indexes}`
+            );
+            app.exchange.fsubscribe(data.symbol, data.interval);
+        });
+
+    } else {
+        console.log('Não tem monitores ativos! ');
+    }
 
     const automations = await app.DB.models.Strautomations.findAll({
         raw: true,
@@ -80,10 +88,14 @@ module.exports = async ( app ) => {
     app.events.on("newCandle", async ( data ) => {
         await updateMemory(data)
 
+        const bnbPrice = JSON.parse(await app.redis.get('BNBBUSD:1m'))
+        if (bnbPrice) {
+            console.log('BNB===========1: ', bnbPrice.current)
+        }
+
         //name para verificar se é channel break
         let indexesPart = `${data.s}:CHANNEL-BREAK`
-        // console.log('Result: ',await app.redis.getAll())
-        // return false
+
         signals = []
         for ( const automation of automations ) {
 
@@ -93,15 +105,11 @@ module.exports = async ( app ) => {
                 const indicatiors = automation.indexes.split(',');
                 const indexes = indicatiors.filter(e => e.indexOf(indexesPart) !== - 1)
                 const monitorData = JSON.parse(await app.redis.get(indexes[0]))
-                // console.log('indexes: ',indexes[0]);
-                // console.log('monitorData: ',monitorData);
-                // console.log('channel: ',channel);
                 if (!monitorData){
                     app.logger('M', `Alerta app-server linha 98: Monitor ${indexes[0]} não carregado.`);
                     return false
                 }
                 const currentPrice = monitorData['current'][channel]
-                // console.log('Result: ',currentPrice);
 
                 // console.log('Cancelando o envio de ordem app-server 98: ',currentPrice);
                 // return false
@@ -150,7 +158,8 @@ module.exports = async ( app ) => {
         app.logger("updateMemory", `${data.s}:${data.i}:CANDLES [SALVO NA MEMÓRIA OS ULTIMOS 500 CANDLES FECHADOS]`);
 
         //adicionando o preço a tual no redis
-        await app.redis.set(`${data.s}:${data.i}`, JSON.stringify({ current: history[history.length - 1][4] }))
+        // await app.redis.set(`${data.s}:${data.i}`, JSON.stringify({ current: history[history.length - 1][4] }))
+        await app.redis.set(`${data.s}:${data.i}`, JSON.stringify({ current: history[history.length - 1][4]}))
         app.logger("updateMemory", `${data.s}:${data.i} current:${history[history.length - 1][4]}`)
 
         const monitors = await app.redis.getAll();
